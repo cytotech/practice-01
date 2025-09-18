@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive 2D Graphing Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+    <!-- MathQuill dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.min.js"></script>
+    <!-- KaTeX for math fonts -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        body {
+            display: flex;
+            height: 100vh;
+            background: #f5f5f5;
+            overflow: hidden;
+        }
+
+        #left-panel {
+            width: 30%;
+            min-width: 250px;
+            background: #fff;
+            border-right: 1px solid #ddd;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        #equation-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .equation-row {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            background: #fafafa;
+        }
+
+        .equation-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .equation-row .math-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: #fff;
+            font-size: 16px;
+            min-height: 36px;
+        }
+        
+        .equation-row .math-input:focus-within {
+            border-color: #2196f3;
+            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+        }
+        
+        /* MathQuill styles override */
+        .mq-editable-field {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            font-size: 16px !important;
+        }
+        
+        .mq-math-mode {
+            font-family: 'KaTeX_Math', 'Times New Roman', serif !important;
+        }
+        
+        .mq-math-mode .mq-non-leaf {
+            display: inline-flex !important;
+            align-items: center;
+        }
+
+        .equation-row button {
+            background: #ff4d4f;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 10px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        .equation-row button:hover {
+            background: #d9363e;
+        }
+
+        #add-equation {
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 10px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        #add-equation:hover {
+            background: #218838;
+        }
+
+        .slider-container {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+
+        .slider-container label {
+            font-size: 14px;
+            margin-right: 10px;
+        }
+
+        .slider-container input[type="range"] {
+            width: 100%;
+        }
+
+        #right-panel {
+            flex: 1;
+            background: #fff;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+            }
+            #left-panel {
+                width: 100%;
+                height: 40%;
+                overflow-y: auto;
+            }
+            #right-panel {
+                width: 100%;
+                height: 60%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="left-panel">
+        <div id="equation-list"></div>
+        <button id="add-equation">+ Add Equation</button>
+    </div>
+    <div id="right-panel"></div>
+
+    <script>
+        let equations = [];
+        let sliders = {};
+        let scale = 50; // Pixels per unit
+        let offsetX = 0, offsetY = 0;
+        let isDragging = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        // p5.js instance mode for proper rendering
+        new p5((sk) => {
+            sk.setup = function() {
+                const container = document.getElementById('right-panel');
+                const canvas = sk.createCanvas(container.offsetWidth, container.offsetHeight);
+                canvas.parent(container);
+                sk.frameRate(60);
+
+                // Initialize canvas properties
+                canvas.elt.style.touchAction = 'none'; // Prevent default touch actions
+                canvas.elt.style.cursor = 'grab';
+                
+                // Handle pan/drag events
+                canvas.elt.addEventListener('mousedown', (e) => {
+                    if (e.button === 0) { // Left click only
+                        isDragging = true;
+                        lastMouseX = e.offsetX;
+                        lastMouseY = e.offsetY;
+                        canvas.elt.style.cursor = 'grabbing';
+                    }
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (isDragging) {
+                        const rect = canvas.elt.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const y = e.clientY - rect.top;
+                        offsetX += (x - lastMouseX);
+                        offsetY += (y - lastMouseY);
+                        lastMouseX = x;
+                        lastMouseY = y;
+                        e.preventDefault();
+                    }
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (isDragging) {
+                        isDragging = false;
+                        canvas.elt.style.cursor = 'grab';
+                    }
+                });
+
+                // Handle zoom events
+                // Handle zooming with both mousewheel and trackpad
+                canvas.elt.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    
+                    // Get mouse position relative to canvas
+                    const rect = canvas.elt.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    
+                    // Calculate zoom factor based on delta
+                    const zoomSensitivity = 0.001;
+                    const zoomAmount = e.deltaY * zoomSensitivity;
+                    const zoomFactor = Math.pow(0.999, e.deltaY);
+                    
+                    // Calculate points before zoom
+                    const xBeforeZoom = (mouseX - sk.width/2 - offsetX) / scale;
+                    const yBeforeZoom = (mouseY - sk.height/2 - offsetY) / scale;
+                    
+                    // Update scale with constraints
+                    const newScale = scale * zoomFactor;
+                    if (newScale >= 10 && newScale <= 1000) {
+                        scale = newScale;
+                        
+                        // Adjust offset to zoom toward mouse position
+                        const xAfterZoom = (mouseX - sk.width/2 - offsetX) / scale;
+                        const yAfterZoom = (mouseY - sk.height/2 - offsetY) / scale;
+                        offsetX += (xAfterZoom - xBeforeZoom) * scale;
+                        offsetY += (yAfterZoom - yBeforeZoom) * scale;
+                    }
+                }, { passive: false });
+            };
+
+            let tooltip = { visible: false, x: 0, y: 0, text: '' };
+            let targetScale = scale;            sk.draw = function() {
+                // Clear background
+                sk.background(0);
+
+                // Apply transformations
+                sk.push();
+                sk.translate(sk.width/2 + offsetX, sk.height/2 + offsetY);
+                sk.scale(1, -1); // Flip Y axis
+
+                // Draw basic elements
+                drawGrid(sk);
+                drawAxes(sk);
+                drawEquations(sk);
+                
+                // Draw coordinate tooltip
+                if (tooltip.visible) {
+                    sk.push();
+                    sk.scale(1, -1);
+                    sk.noStroke();
+                    sk.fill(33, 150, 243, 200);
+                    let px = (sk.mouseX - sk.width/2 - offsetX) / scale;
+                    let py = -(sk.mouseY - sk.height/2 - offsetY) / scale;
+                    tooltip.x = sk.lerp(tooltip.x, sk.mouseX + 10, 0.2);
+                    tooltip.y = sk.lerp(tooltip.y, sk.mouseY - 10, 0.2);
+                    sk.rect(tooltip.x - 5, tooltip.y - 15, 100, 25, 5);
+                    sk.fill(255);
+                    sk.textAlign(sk.LEFT, sk.CENTER);
+                    sk.textSize(12);
+                    sk.text(`(${px.toFixed(2)}, ${py.toFixed(2)})`, tooltip.x, tooltip.y);
+                    sk.pop();
+                }
+                sk.pop();
+            };
+
+            sk.mouseWheel = function(event) {
+                if (sk.mouseX >= 0 && sk.mouseX <= sk.width && sk.mouseY >= 0 && sk.mouseY <= sk.height) {
+                    event.preventDefault();
+                    
+                    const zoomFactor = event.delta > 0 ? 0.9 : 1.1;
+                    
+                    // Get mouse position before zoom
+                    const mouseXBefore = (sk.mouseX - sk.width/2 - offsetX) / scale;
+                    const mouseYBefore = -(sk.mouseY - sk.height/2 - offsetY) / scale;
+                    
+                    // Apply zoom
+                    scale *= zoomFactor;
+                    scale = sk.constrain(scale, 10, 1000);
+                    
+                    // Get mouse position after zoom
+                    const mouseXAfter = (sk.mouseX - sk.width/2 - offsetX) / scale;
+                    const mouseYAfter = -(sk.mouseY - sk.height/2 - offsetY) / scale;
+                    
+                    // Adjust offset to zoom towards mouse
+                    offsetX -= (mouseXAfter - mouseXBefore) * scale;
+                    offsetY += (mouseYAfter - mouseYBefore) * scale;
+                    
+                    return false;
+                }
+            };
+
+            sk.mousePressed = function() {
+                if (sk.mouseX >= 0 && sk.mouseX <= sk.width && sk.mouseY >= 0 && sk.mouseY <= sk.height) {
+                    isDragging = true;
+                    lastX = sk.mouseX;
+                    lastY = sk.mouseY;
+                    return false;
+                }
+            };
+
+            sk.mouseDragged = function() {
+                if (isDragging) {
+                    offsetX += sk.mouseX - lastX;
+                    offsetY += sk.mouseY - lastY;
+                    lastX = sk.mouseX;
+                    lastY = sk.mouseY;
+                    return false;
+                }
+            };
+
+            sk.mouseReleased = function() {
+                isDragging = false;
+                return false;
+            };
+
+            sk.windowResized = function() {
+                let rightPanel = document.getElementById('right-panel');
+                let w = rightPanel.offsetWidth || window.innerWidth * 0.7;
+                let h = rightPanel.offsetHeight || window.innerHeight;
+                sk.resizeCanvas(w, h);
+            };
+        });
+
+        function setImmersiveBackground(sk) {
+            sk.background(0);
+        }
+
+        function drawImmersiveGrid(sk) {
+            let step = 1;
+            let subStep = 0.2; // Smaller divisions for minor grid lines
+            
+            // Calculate grid boundaries
+            let xMin = -sk.width / (2 * scale) - offsetX / scale;
+            let xMax = sk.width / (2 * scale) - offsetX / scale;
+            let yMin = -sk.height / (2 * scale) - offsetY / scale;
+            let yMax = sk.height / (2 * scale) - offsetY / scale;
+            
+            // Determine grid spacing based on zoom level
+            let zoomLevel = Math.log10(scale);
+            let majorStep = Math.pow(10, Math.floor(zoomLevel));
+            let minorStep = majorStep / 5;
+            
+            // Draw subtle color transition around axes
+            let transitionWidth = 50;
+            sk.noStroke();
+            
+            // X-axis color transition
+            for (let y = -transitionWidth; y <= transitionWidth; y++) {
+                let alpha = sk.map(Math.abs(y), 0, transitionWidth, 30, 0);
+                sk.fill(33, 150, 243, alpha);
+                sk.rect(-sk.width/2 - offsetX, y, sk.width, 1);
+            }
+            
+            // Y-axis color transition
+            for (let x = -transitionWidth; x <= transitionWidth; x++) {
+                let alpha = sk.map(Math.abs(x), 0, transitionWidth, 30, 0);
+                sk.fill(33, 150, 243, alpha);
+                sk.rect(x, -sk.height/2 - offsetY, 1, sk.height);
+            }
+            
+            // Draw minor grid lines
+            sk.strokeWeight(0.5);
+            for (let x = Math.floor(xMin / minorStep) * minorStep; x <= xMax; x += minorStep) {
+                if (x !== 0) {
+                    let distanceFromAxis = Math.abs(x % majorStep) / majorStep;
+                    let alpha = sk.map(distanceFromAxis, 0, 1, 60, 20);
+                    sk.stroke(200, 200, 200, alpha);
+                    sk.line(x * scale, yMin * scale, x * scale, yMax * scale);
+                }
+            }
+            for (let y = Math.floor(yMin / minorStep) * minorStep; y <= yMax; y += minorStep) {
+                if (y !== 0) {
+                    let distanceFromAxis = Math.abs(y % majorStep) / majorStep;
+                    let alpha = sk.map(distanceFromAxis, 0, 1, 60, 20);
+                    sk.stroke(200, 200, 200, alpha);
+                    sk.line(xMin * scale, y * scale, xMax * scale, y * scale);
+                }
+            }
+            
+            // Draw major grid lines
+            sk.strokeWeight(1);
+            for (let x = Math.floor(xMin / majorStep) * majorStep; x <= xMax; x += majorStep) {
+                if (x !== 0) {
+                    sk.stroke(200, 200, 200, 80);
+                    sk.line(x * scale, yMin * scale, x * scale, yMax * scale);
+                    
+                    // Add grid number labels
+                    sk.push();
+                    sk.scale(1, -1);
+                    sk.noStroke();
+                    sk.fill(200, 200, 200, 200);
+                    sk.textAlign(sk.CENTER, sk.TOP);
+                    sk.textSize(10);
+                    sk.text(x.toFixed(1), x * scale, 5);
+                    sk.pop();
+                }
+            }
+            for (let y = Math.floor(yMin / majorStep) * majorStep; y <= yMax; y += majorStep) {
+                if (y !== 0) {
+                    sk.stroke(200, 200, 200, 80);
+                    sk.line(xMin * scale, y * scale, xMax * scale, y * scale);
+                    
+                    // Add grid number labels
+                    sk.push();
+                    sk.scale(1, -1);
+                    sk.noStroke();
+                    sk.fill(200, 200, 200, 200);
+                    sk.textAlign(sk.RIGHT, sk.CENTER);
+                    sk.textSize(10);
+                    sk.text(y.toFixed(1), -5, -y * scale);
+                    sk.pop();
+                }
+            }
+        }
+
+        function drawImmersiveAxes(sk) {
+            sk.stroke(33, 150, 243); // Matching blue color for axes
+            sk.strokeWeight(3);
+            sk.line(-sk.width / 2 - offsetX, 0, sk.width / 2 - offsetX, 0);
+            sk.line(0, -sk.height / 2 - offsetY, 0, sk.height / 2 - offsetY);
+            sk.push();
+            sk.scale(1, -1);
+            sk.fill(33, 150, 243);
+            sk.noStroke();
+            sk.textSize(18);
+            sk.text('x', sk.width / 2 - offsetX - 20, 25);
+            sk.text('y', 10, -sk.height / 2 + offsetY + 30);
+            sk.pop();
+        }
+
+        function drawEquations(sk) {
+            let colors = ['#ff4d4f', '#28a745', '#007bff', '#ffca28'];
+            
+            equations.forEach((eq, index) => {
+                if (!eq.active) return;
+                
+                let color = colors[index % colors.length];
+                sk.stroke(color);
+                sk.strokeWeight(2);
+                sk.noFill();
+                
+                // Draw the main curve
+                sk.beginShape();
+                let xMin = -sk.width / (2 * scale) - offsetX / scale;
+                let xMax = sk.width / (2 * scale) - offsetX / scale;
+                let points = [];
+                
+                for (let x = xMin; x <= xMax; x += 0.01) {
+                    let y = evaluateEquation(eq.func, x);
+                    if (isFinite(y)) {
+                        sk.vertex(x * scale, y * scale);
+                        points.push({ x, y });
+                    } else {
+                        sk.endShape();
+                        sk.beginShape();
+                    }
+                }
+                sk.endShape();
+                
+                // Draw hover point if mouse is near the curve
+                if (tooltip.visible) {
+                    let mouseX = (sk.mouseX - sk.width/2 - offsetX) / scale;
+                    let mouseY = -(sk.mouseY - sk.height/2 - offsetY) / scale;
+                    
+                    // Find closest point on curve
+                    let closest = points.reduce((prev, curr) => {
+                        let prevDist = Math.hypot(prev.x - mouseX, prev.y - mouseY);
+                        let currDist = Math.hypot(curr.x - mouseX, curr.y - mouseY);
+                        return currDist < prevDist ? curr : prev;
+                    }, points[0]);
+                    
+                    let dist = Math.hypot(closest.x - mouseX, closest.y - mouseY);
+                    if (dist < 0.5) {
+                        // Draw point on curve
+                        sk.push();
+                        sk.noStroke();
+                        sk.fill(color);
+                        sk.circle(closest.x * scale, closest.y * scale, 8);
+                        
+                        // Draw dashed lines to axes
+                        sk.stroke(color);
+                        sk.strokeWeight(1);
+                        drawDashedLine(sk, 
+                            closest.x * scale, closest.y * scale,
+                            closest.x * scale, 0,
+                            5
+                        );
+                        drawDashedLine(sk,
+                            closest.x * scale, closest.y * scale,
+                            0, closest.y * scale,
+                            5
+                        );
+                        sk.pop();
+                        
+                        // Update tooltip with curve point coordinates
+                        tooltip.text = `(${closest.x.toFixed(2)}, ${closest.y.toFixed(2)})`;
+                    }
+                }
+            });
+        }
+        
+        function drawDashedLine(sk, x1, y1, x2, y2, dashLength) {
+            let d = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+            let dashes = Math.floor(d / dashLength);
+            let dashX = (x2 - x1) / dashes;
+            let dashY = (y2 - y1) / dashes;
+            
+            sk.push();
+            for (let i = 0; i < dashes; i++) {
+                if (i % 2 === 0) {
+                    sk.line(
+                        x1 + (i * dashX), y1 + (i * dashY),
+                        x1 + ((i + 1) * dashX), y1 + ((i + 1) * dashY)
+                    );
+                }
+            }
+            sk.pop();
+        }
+        
+
+        function evaluateEquation(func, x) {
+            try {
+                if (func === undefined || func === '') {
+                    console.error('Empty function received');
+                    return NaN;
+                }
+                
+                // Sanitize the function string
+                if (!/^[a-zA-Z0-9_\s+\-*/.(),^Math]+$/.test(func)) {
+                    console.error('Invalid characters in function');
+                    return NaN;
+                }
+                
+                let scope = { x, ...sliders };
+                // Use Function constructor for safe context
+                let evalFunc;
+                try {
+                    evalFunc = Function(...Object.keys(scope), `return ${func}`);
+                } catch (syntaxError) {
+                    console.error('Syntax error in function:', syntaxError);
+                    return NaN;
+                }
+                
+                let result = evalFunc(...Object.values(scope));
+                
+                if (typeof result !== 'number' || !isFinite(result)) {
+                    console.error('Invalid result for x =', x, ':', result);
+                    return NaN;
+                }
+                
+                // Clamp extremely large values to prevent rendering issues
+                const MAX_VALUE = 1e10;
+                if (Math.abs(result) > MAX_VALUE) {
+                    return Math.sign(result) * MAX_VALUE;
+                }
+                
+                return result;
+            } catch (e) {
+                console.error('Error evaluating equation:', func, 'at x =', x, ':', e);
+                return NaN;
+            }
+        }
+
+        // Equation and Slider Management
+        function addEquationRow(equation = '') {
+            let index = equations.length;
+            equations.push({ func: equation, active: true });
+            let row = document.createElement('div');
+            row.className = 'equation-row';
+            
+            // Create MathQuill input field
+            let span = document.createElement('span');
+            span.className = 'math-input';
+            row.appendChild(span);
+            
+            let removeBtn = document.createElement('button');
+            removeBtn.textContent = 'X';
+            removeBtn.onclick = () => removeEquation(index);
+            row.appendChild(removeBtn);
+            
+            document.getElementById('equation-list').appendChild(row);
+            
+            // Initialize MathQuill
+            let MQ = MathQuill.getInterface(2);
+            let mathField = MQ.MathField(span, {
+                spaceBehavesLikeTab: true,
+                handlers: {
+                    edit: () => {
+                        let latex = mathField.latex();
+                        let parsed = parseLatexToJS(latex);
+                        equations[index].func = parsed;
+                        interpretEquation(parsed, index);
+                    }
+                }
+            });
+            
+            // Set initial value if provided
+            if (equation) {
+                mathField.latex(convertToLatex(equation));
+            }
+        }
+
+        function removeEquation(index) {
+            equations[index].active = false;
+            document.getElementById('equation-list').children[index].remove();
+            equations[index] = { func: '', active: false };
+        }
+
+        function addSlider(param, value = 0, min = -10, max = 10) {
+            sliders[param] = value;
+            let sliderDiv = document.createElement('div');
+            sliderDiv.className = 'slider-container';
+            sliderDiv.innerHTML = `
+                <label>${param}: <span>${value.toFixed(2)}</span></label>
+                <input type="range" min="${min}" max="${max}" step="0.1" value="${value}">
+                <button class="remove-slider" style="margin-left:10px;background:#ff4d4f;color:white;border:none;border-radius:3px;padding:5px 10px;cursor:pointer;">Remove</button>
+            `;
+            document.getElementById('equation-list').appendChild(sliderDiv);
+            let slider = sliderDiv.querySelector('input');
+            let label = sliderDiv.querySelector('span');
+            slider.addEventListener('input', () => {
+                sliders[param] = parseFloat(slider.value);
+                label.textContent = sliders[param].toFixed(2);
+            });
+            sliderDiv.querySelector('.remove-slider').addEventListener('click', () => {
+                delete sliders[param];
+                sliderDiv.remove();
+            });
+        }
+
+        // AI Equation Interpretation (Placeholder)
+        // Parse human equation to JS syntax
+        // Convert human-readable/LaTeX to JavaScript
+        function parseLatexToJS(latex) {
+            console.log('Original input:', latex);
+            
+            // Handle empty input
+            if (!latex || latex.trim() === '') {
+                return '0';
+            }
+            
+            let parsed = latex.trim();
+            
+            // Step 1: Basic function pattern for both LaTeX and plain text
+            const functionPatterns = {
+                'sin': 'Math.sin',
+                'cos': 'Math.cos',
+                'tan': 'Math.tan',
+                'log': 'Math.log',
+                'sqrt': 'Math.sqrt',
+                'exp': 'Math.exp'
+            };
+            
+            // First handle LaTeX functions
+            for (let [func, mathFunc] of Object.entries(functionPatterns)) {
+                // Replace LaTeX functions first
+                let latexPattern = new RegExp(`\\\\${func}`, 'g');
+                parsed = parsed.replace(latexPattern, mathFunc);
+            }
+            
+            // Then handle plain text functions
+            for (let [func, mathFunc] of Object.entries(functionPatterns)) {
+                // Replace plain text functions only if they're not already Math.func
+                let plainPattern = new RegExp(`(?<!Math\\.)\\b${func}\\b`, 'g');
+                parsed = parsed.replace(plainPattern, mathFunc);
+            }
+            
+            // Step 2: Add parentheses to function arguments if missing
+            parsed = parsed.replace(/Math\.(sin|cos|tan|log|sqrt|exp)\s*([^({]+)/g, 'Math.$1($2)');
+            
+            // Step 3: Handle math constants
+            parsed = parsed
+                .replace(/\\pi\b|\bpi\b/g, 'Math.PI')
+                .replace(/\\e\b|\be\b/g, 'Math.E');
+            
+            // Step 4: Handle powers
+            parsed = parsed
+                .replace(/\^{([^}]+)}/g, '^($1)')
+                .replace(/\^(\d+|\w+)/g, '^($1)')
+                .replace(/(\w+|\d+|\))?\^(\([^)]+\)|\d+|\w+)/g, 
+                    (match, base, exp) => `Math.pow(${base || 'x'},${exp})`);
+            
+            // Step 5: Handle fractions
+            parsed = parsed.replace(/\\frac{([^}]+)}{([^}]+)}/g, '($1)/($2)');
+            
+            // Step 6: Handle implicit multiplication
+            parsed = parsed
+                .replace(/(\d)([a-zA-Z(])/g, '$1*$2')
+                .replace(/([a-zA-Z0-9_)}])([a-zA-Z(])/g, '$1*$2')
+                .replace(/\)\(/g, ')*(')
+                .replace(/(\d+|[a-zA-Z])\(/g, '$1*(')
+                .replace(/\)([a-zA-Z\d])/g, ')*$1');
+            
+            // Step 7: Clean up
+            parsed = parsed
+                .replace(/\s+/g, '')
+                .replace(/\\left|\\right/g, '')
+                .replace(/[{}]/g, '');
+            
+            console.log('Parsed result:', parsed);
+            
+            // Validate the expression
+            try {
+                // Test with x = 0
+                let scope = { x: 0 };
+                let testFunc = Function(...Object.keys(scope), `return ${parsed}`);
+                let testResult = testFunc(...Object.values(scope));
+                console.log('Test evaluation at x=0:', testResult);
+                
+                if (typeof testResult !== 'number' || !isFinite(testResult)) {
+                    throw new Error('Invalid result from test evaluation');
+                }
+                
+                return parsed;
+            } catch (e) {
+                console.error('Invalid expression:', e);
+                return 'Math.sin(x)'; // Return default sine function if parsing fails
+            }
+        }
+        
+        // Convert JavaScript expression to LaTeX
+        function convertToLatex(expr) {
+            let latex = expr;
+            
+            // Convert Math functions to LaTeX
+            latex = latex.replace(/Math\.(sin|cos|tan|log|sqrt)/g, '\\$1');
+            latex = latex.replace(/Math\.pow\(([^,]+),([^)]+)\)/g, '{$1}^{$2}');
+            
+            // Convert operators
+            latex = latex.replace(/\*/g, '\\cdot ');
+            latex = latex.replace(/\//g, '\\div ');
+            
+            // Convert constants
+            latex = latex.replace(/Math\.PI/g, '\\pi');
+            latex = latex.replace(/Math\.E/g, 'e');
+            
+            return latex;
+        }
+
+        async function interpretEquation(equation, index) {
+            try {
+                let parsed = parseEquationToJS(equation);
+                let response = { parsed, params: extractParams(parsed) };
+                equations[index].func = response.parsed;
+                response.params.forEach(param => {
+                    if (!(param in sliders)) {
+                        addSlider(param);
+                    }
+                });
+            } catch (e) {}
+        }
+
+        function extractParams(equation) {
+            let vars = equation.match(/[a-zA-Z]+/g) || [];
+            return vars.filter(v => v !== 'x' && v !== 'sin' && v !== 'cos' && v !== 'tan' && v !== 'log');
+        }
+
+        document.getElementById('add-equation').addEventListener('click', () => addEquationRow());
+        addEquationRow('sin(x)'); // Start with simple sin(x)
+
+        // Animation loop for smooth parameter updates
+        function animateSliders() {
+            Object.keys(sliders).forEach(param => {
+                if (param === 'a') {
+                    sliders[param] = 2 * Math.sin(performance.now() * 0.002);
+                    let sliderContainers = document.querySelectorAll('.slider-container');
+                    sliderContainers.forEach(container => {
+                        let label = container.querySelector('label');
+                        if (label && label.textContent.startsWith('a:')) {
+                            let slider = container.querySelector('input[type="range"]');
+                            if (slider) {
+                                slider.value = sliders[param];
+                                container.querySelector('span').textContent = sliders[param].toFixed(2);
+                            }
+                        }
+                    });
+                }
+            });
+            requestAnimationFrame(animateSliders);
+        }
+        animateSliders();
+    </script>
+</body>
+</html>
